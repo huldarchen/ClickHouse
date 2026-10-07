@@ -29,7 +29,7 @@ public:
         const WriteSettings & write_settings,
         WrittenOffsetSubstreams * written_offset_substreams,
         bool try_adaptive_codec,
-        StreamBaseManifestPtr stream_base_manifest = nullptr);
+        StreamBaseManifestPtr stream_base_manifest);
 
     Block getHeader() const { return metadata_snapshot->getSampleBlock(); }
 
