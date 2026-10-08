@@ -936,7 +936,6 @@ void prepareBuildQueryPlanForTableExpression(const QueryTreeNodePtr & table_expr
 
 void updatePrewhereOutputsIfNeeded(SelectQueryInfo & table_expression_query_info,
     const Names & column_names,
-    const StoragePtr & storage,
     const StorageSnapshotPtr & storage_snapshot)
 {
     if (!table_expression_query_info.prewhere_info)
@@ -972,10 +971,6 @@ void updatePrewhereOutputsIfNeeded(SelectQueryInfo & table_expression_query_info
         {
             auto columns_required_for_final = storage_snapshot->metadata->getColumnsRequiredForFinal();
             required_columns.insert(columns_required_for_final.begin(), columns_required_for_final.end());
-
-            auto columns_required_for_merging_final = getColumnsRequiredForMergingFinal(
-                storage, storage_snapshot->metadata, table_expression_query_info.planner_context->getQueryContext());
-            required_columns.insert(columns_required_for_merging_final.begin(), columns_required_for_merging_final.end());
         }
     }
 
@@ -2194,7 +2189,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(TableExpressionNodePtr table_
                     prewhere_info->need_filter = true;
                 }
 
-                updatePrewhereOutputsIfNeeded(table_expression_query_info, table_expression_data.getColumnNames(), storage, storage_snapshot);
+                updatePrewhereOutputsIfNeeded(table_expression_query_info, table_expression_data.getColumnNames(), storage_snapshot);
 
                 /// The row-level filter runs inside the reading step and must keep any column a later
                 /// additional_table_filters step (applied on top) still needs, else that column is dropped

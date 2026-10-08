@@ -15,30 +15,6 @@ namespace DB
 class SummingSortedTransform final : public IMergingTransform<SummingSortedAlgorithm>
 {
 public:
-    static constexpr auto sum_function_name = "sumWithOverflow";
-    static constexpr auto sum_function_map_name = "sumMapWithOverflow";
-    static constexpr bool remove_default_values = true;
-    static constexpr bool aggregate_all_columns = false;
-
-    /// See `SummingSortedAlgorithm::getAggregatedColumnNames`.
-    static NameSet getAggregatedColumnNames(
-        const Block & sample_header,
-        const SortDescription & sort_description,
-        const Names & column_names_to_sum,
-        const Names & partition_and_sorting_required_columns,
-        bool allow_tuple_element_aggregation)
-    {
-        return SummingSortedAlgorithm::getAggregatedColumnNames(
-            sample_header,
-            sort_description,
-            column_names_to_sum,
-            partition_and_sorting_required_columns,
-            sum_function_name,
-            sum_function_map_name,
-            remove_default_values,
-            aggregate_all_columns,
-            allow_tuple_element_aggregation);
-    }
 
     SummingSortedTransform(
         SharedHeader header, size_t num_inputs,
@@ -49,7 +25,11 @@ public:
         size_t max_block_size_rows,
         size_t max_block_size_bytes,
         std::optional<size_t> max_dynamic_subcolumns_,
-        bool allow_tuple_element_aggregation
+        bool allow_tuple_element_aggregation,
+        /// Whether to remove the rows in which all summed columns are zero after summing.
+        /// Merges do it, but `SELECT ... FINAL` does not: a query may read only a subset of
+        /// the summed columns, so it cannot decide whether a row is zero the way a merge does.
+        bool remove_zero_rows = true
         )
         : IMergingTransform(
             num_inputs, header, header, /*have_all_inputs_=*/ true, /*limit_hint_=*/ 0, /*always_read_till_end_=*/ false,
@@ -61,10 +41,10 @@ public:
             max_block_size_rows,
             max_block_size_bytes,
             max_dynamic_subcolumns_,
-            sum_function_name,
-            sum_function_map_name,
-            remove_default_values,
-            aggregate_all_columns,
+            "sumWithOverflow",
+            "sumMapWithOverflow",
+            remove_zero_rows,
+            false,
             allow_tuple_element_aggregation)
     {
     }

@@ -69,7 +69,6 @@
 #include <Processors/QueryPlan/AggregatingStep.h>
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/QueryPlan.h>
-#include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <QueryPipeline/SizeLimits.h>
 #include <Storages/StorageDictionary.h>
 #include <Storages/StorageDistributed.h>
@@ -2121,12 +2120,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
             Names columns_for_final = metadata_snapshot->getColumnsRequiredForFinal();
             additional_required_columns_after_prewhere.insert(additional_required_columns_after_prewhere.end(),
                 columns_for_final.begin(), columns_for_final.end());
-
-            /// `castStorage` only reads through the proxies, so dropping `const` for the call is harmless.
-            const auto columns_for_merging_final = getColumnsRequiredForMergingFinal(
-                std::const_pointer_cast<IStorage>(storage), metadata_snapshot, context);
-            additional_required_columns_after_prewhere.insert(additional_required_columns_after_prewhere.end(),
-                columns_for_merging_final.begin(), columns_for_merging_final.end());
         }
 
         if (storage && additional_filter)
