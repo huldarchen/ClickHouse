@@ -12,7 +12,7 @@ OPTIMIZE TABLE t_untyped_substreams FINAL; -- inserts aren't adaptive, merges ar
 
 SELECT mapKeys(codec_block_counts)
 FROM mergeTreeCodecBlockCounts(currentDatabase(), t_untyped_substreams)
-WHERE substream = 'm.bucket_indexes';
+WHERE substream = 'm.buckets_info';
 
 SELECT count(), countIf(mapValues(m) = [1, 2]) FROM t_untyped_substreams;
 
