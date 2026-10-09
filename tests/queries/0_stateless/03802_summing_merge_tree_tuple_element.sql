@@ -245,6 +245,9 @@ CREATE TABLE test_summing_zero_row (
 ) ENGINE = SummingMergeTree() ORDER BY id
 SETTINGS allow_tuple_element_aggregation = 1;
 
+-- A background merge would remove the zero rows before `SELECT ... FINAL`.
+SYSTEM STOP MERGES test_summing_zero_row;
+
 -- Insert rows that cancel each other out (sum to zero)
 INSERT INTO test_summing_zero_row VALUES (1, (100, 50, (10))), (2, (200, 80, (20)));
 INSERT INTO test_summing_zero_row VALUES (1, (-100, -50, (-10))), (2, (-200, -80, (-20)));
@@ -255,6 +258,7 @@ INSERT INTO test_summing_zero_row VALUES (3, (100, 10, (-30)));
 SELECT 'Zero row - with FINAL:';
 SELECT id, metrics FROM test_summing_zero_row FINAL ORDER BY id;
 
+SYSTEM START MERGES test_summing_zero_row;
 OPTIMIZE TABLE test_summing_zero_row FINAL;
 
 SELECT 'Zero row - after OPTIMIZE:';
