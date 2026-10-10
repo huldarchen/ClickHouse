@@ -3771,7 +3771,7 @@ ClickHouse can merge the data parts so that different resulting parts of data ca
 
 The values in the columns with the numeric data type are summed. The set of columns is defined by the parameter `columns`.
 
-If the values were 0 in all of the columns for summation, the row is deleted during a merge. A query with the [FINAL](/reference/statements/select/from#final-modifier) modifier sums the rows but does not delete such rows, so its result does not depend on which columns the query reads.
+If the values were 0 in all of the columns for summation, the row is deleted during a merge. A query with the [FINAL](/reference/statements/select/from#final-modifier) modifier sums the rows but does not delete such rows, so the set of rows it returns does not depend on which columns the query reads. Note that `FINAL` merges a [nested structure](#nested-structures) whose name ends with `Map` the same way as a merge only if the query reads all columns of that structure.
 
 If column is not in the primary key and is not summed, an arbitrary value is selected from the existing ones.
 
