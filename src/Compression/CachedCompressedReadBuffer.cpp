@@ -62,8 +62,7 @@ bool CachedCompressedReadBuffer::nextImpl()
         return cell;
     };
 
-    /// At or past the read-until position the input of this reader may end before the file does; reading such a
-    /// block through the cache would make that end visible to every reader of the file.
+    /// The cache is shared by every reader of the file, so a block at or past this reader's bound is not put into it.
     if (read_until_position && file_pos >= *read_until_position)
     {
         owned_cell = load();
