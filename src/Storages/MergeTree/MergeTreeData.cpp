@@ -1700,13 +1700,23 @@ ExpressionActionsPtr getCombinedIndicesExpression(
     const MergeTreeIndices & indices,
     const ColumnsDescription & columns,
     const VirtualColumnsDescription & virtuals,
-    ContextPtr context)
+    ContextPtr context,
+    const std::function<bool(const String &)> & use_index_expression = {})
 {
     ASTPtr combined_expr_list = key ? key->expression_list_ast->clone() : make_intrusive<ASTExpressionList>();
 
     for (const auto & index : indices)
-        for (const auto & index_expr : index->index.expression_list_ast->children)
-            combined_expr_list->children.push_back(index_expr->clone());
+    {
+        /// `column_names` are the analyzed result names, one per expression.
+        const auto & index_exprs = index->index.expression_list_ast->children;
+        chassert(index_exprs.size() == index->index.column_names.size());
+        for (size_t i = 0; i < index_exprs.size(); ++i)
+            if (!use_index_expression || use_index_expression(index->index.column_names[i]))
+                combined_expr_list->children.push_back(index_exprs[i]->clone());
+    }
+
+    if (!key && combined_expr_list->children.empty())
+        return nullptr;
 
     auto syntax_result = TreeRewriter(context).analyze(combined_expr_list, VirtualColumnUtils::getColumnsWithVirtualsForAnalysis(columns, virtuals));
     return ExpressionAnalyzer(combined_expr_list, syntax_result, context).getActions(false);
@@ -1759,15 +1769,22 @@ MergeTreeData::getPrimaryKeyAndSkipIndicesExpression(const StorageMetadataPtr & 
 }
 
 ExpressionActionsPtr
-MergeTreeData::getSortingKeyAndSkipIndicesExpression(const StorageMetadataPtr & metadata_snapshot, const MergeTreeIndices & indices) const
+MergeTreeData::getSortingKeyAndSkipIndicesExpression(
+    const StorageMetadataPtr & metadata_snapshot,
+    const MergeTreeIndices & indices,
+    const std::function<bool(const String &)> & use_index_expression) const
 {
-    return getCombinedIndicesExpression(&metadata_snapshot->getSortingKey(), indices, metadata_snapshot->columns, metadata_snapshot->virtuals, getContext());
+    return getCombinedIndicesExpression(
+        &metadata_snapshot->getSortingKey(), indices, metadata_snapshot->columns, metadata_snapshot->virtuals, getContext(), use_index_expression);
 }
 
-ExpressionActionsPtr
-MergeTreeData::getSkipIndicesExpression(const StorageMetadataPtr & metadata_snapshot, const MergeTreeIndices & indices) const
+ExpressionActionsPtr MergeTreeData::getSkipIndicesExpression(
+    const StorageMetadataPtr & metadata_snapshot,
+    const MergeTreeIndices & indices,
+    const std::function<bool(const String &)> & use_index_expression) const
 {
-    return getCombinedIndicesExpression(nullptr, indices, metadata_snapshot->columns, metadata_snapshot->virtuals, getContext());
+    return getCombinedIndicesExpression(
+        nullptr, indices, metadata_snapshot->columns, metadata_snapshot->virtuals, getContext(), use_index_expression);
 }
 
 void MergeTreeData::checkPartitionKeyAndInitMinMax(const KeyDescription & new_partition_key)

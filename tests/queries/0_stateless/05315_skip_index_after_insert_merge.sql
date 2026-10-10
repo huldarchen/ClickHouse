@@ -4,12 +4,15 @@ DROP TABLE IF EXISTS t_summing_length;
 DROP TABLE IF EXISTS t_summing_modulo;
 DROP TABLE IF EXISTS t_summing_map_keys;
 DROP TABLE IF EXISTS t_coalescing;
+DROP TABLE IF EXISTS t_coalescing_subcolumn;
+DROP TABLE IF EXISTS t_physical_subcolumn_name;
 DROP TABLE IF EXISTS t_aggregating;
 DROP TABLE IF EXISTS t_graphite;
 DROP TABLE IF EXISTS t_graphite_hour;
 DROP TABLE IF EXISTS t_summing_zero;
 DROP TABLE IF EXISTS t_replacing;
 DROP TABLE IF EXISTS t_stored_name;
+DROP TABLE IF EXISTS t_stored_name_composite;
 
 CREATE TABLE t_summing_length (id UInt64, name String, v UInt64, INDEX il length(name) TYPE minmax GRANULARITY 1)
 ENGINE = SummingMergeTree ORDER BY id SETTINGS index_granularity = 100;
@@ -52,6 +55,27 @@ SELECT 'coalescing a + b',
     (SELECT count() FROM t_coalescing WHERE a + b = 11 SETTINGS use_skip_indexes = 1, use_query_condition_cache = 0),
     (SELECT count() FROM t_coalescing WHERE a + b = 11 SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0);
 
+-- The sorting key reads a subcolumn before the merge; the index reads it again from the merged rows.
+CREATE TABLE t_coalescing_subcolumn
+(
+    id UInt64,
+    stats Tuple(k Nullable(UInt64), m Map(String, UInt64)),
+    INDEX im mapKeys(stats.m) TYPE bloom_filter GRANULARITY 1
+)
+ENGINE = CoalescingMergeTree ORDER BY (id, length(stats.m)) SETTINGS index_granularity = 100;
+INSERT INTO t_coalescing_subcolumn SELECT number % 1000, tuple(number, if(number < 1000, map('a', 1), map('b', 1))) FROM numbers(2000)
+SETTINGS optimize_on_insert = 1, max_insert_threads = 1, max_block_size = 65536;
+SELECT 'coalescing subcolumn',
+    (SELECT count() FROM t_coalescing_subcolumn WHERE has(mapKeys(stats.m), 'b') SETTINGS use_skip_indexes = 1, use_query_condition_cache = 0),
+    (SELECT count() FROM t_coalescing_subcolumn WHERE has(mapKeys(stats.m), 'b') SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0);
+
+-- A physical column named like a subcolumn of another column keeps its inserted values.
+CREATE TABLE t_physical_subcolumn_name (id UInt64, o JSON(foo String), `o.foo` String, INDEX il length(`o.foo`) TYPE minmax GRANULARITY 1)
+ENGINE = ReplacingMergeTree ORDER BY id SETTINGS index_granularity = 100;
+INSERT INTO t_physical_subcolumn_name SELECT number % 1000, '{"foo": "parent"}', 'stored' FROM numbers(3000)
+SETTINGS optimize_on_insert = 1, max_insert_threads = 1, max_block_size = 65536;
+SELECT 'physical column named like a subcolumn', count(), countIf(`o.foo` = 'stored') FROM t_physical_subcolumn_name;
+
 CREATE TABLE t_aggregating (id UInt64, v SimpleAggregateFunction(sum, UInt64), INDEX ia v % 7 TYPE minmax GRANULARITY 1)
 ENGINE = AggregatingMergeTree ORDER BY id SETTINGS index_granularity = 100;
 INSERT INTO t_aggregating SELECT number % 1000, 5 FROM numbers(3000)
@@ -71,11 +95,11 @@ SELECT 'graphite toUInt64(Value) % 7',
     (SELECT count() FROM t_graphite WHERE toUInt64(Value) % 7 = 1 SETTINGS use_skip_indexes = 1, use_query_condition_cache = 0),
     (SELECT count() FROM t_graphite WHERE toUInt64(Value) % 7 = 1 SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0);
 
--- Rolled up into a 6000 s window three days ago, so the stored Time is in an earlier hour than the inserted one.
--- The index expression is also a sorting key expression.
+-- 01:39 three days ago is rolled up to the 6000 s window starting at midnight, so the stored Time is in an earlier
+-- hour than the inserted one. The index expression is also a sorting key expression.
 CREATE TABLE t_graphite_hour (Path String, Time DateTime('UTC'), Value Float64, Version UInt32, INDEX ih toStartOfHour(Time) TYPE minmax GRANULARITY 1)
 ENGINE = GraphiteMergeTree('graphite_rollup') ORDER BY (Path, toStartOfHour(Time)) SETTINGS index_granularity = 100;
-INSERT INTO t_graphite_hour SELECT concat('sum_', toString(number)), toDateTime(intDiv(toUInt32(now()) - 3 * 86400, 6000) * 6000 + 5940, 'UTC'), 1, 1
+INSERT INTO t_graphite_hour SELECT concat('sum_', toString(number)), toStartOfDay(now() - INTERVAL 3 DAY, 'UTC') + 5940, 1, 1
 FROM numbers(1000)
 SETTINGS optimize_on_insert = 1, max_insert_threads = 1, max_block_size = 65536;
 SELECT 'graphite toStartOfHour(Time)',
@@ -99,8 +123,8 @@ SELECT 'replacing',
     (SELECT count() FROM t_replacing WHERE length(name) = 5 SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0),
     (SELECT count() FROM t_replacing WHERE toStartOfHour(ts) = toDateTime('2024-01-01 05:00:00', 'UTC') SETTINGS use_skip_indexes = 1, use_query_condition_cache = 0);
 
--- A stored column named like an index expression keeps its inserted values; the other index and the deletion of
--- rows summed to zero still see the merged rows.
+-- A stored column named like an index expression, kept as inserted because it is in the sorting key; the other index
+-- and the deletion of rows summed to zero still see the merged rows.
 CREATE TABLE t_stored_name (id UInt64, name String, `length(name)` UInt64, v Int64,
     INDEX il length(name) TYPE minmax GRANULARITY 1, INDEX im v % 7 TYPE minmax GRANULARITY 1)
 ENGINE = SummingMergeTree ORDER BY (id, `length(name)`) SETTINGS index_granularity = 100;
@@ -111,13 +135,27 @@ SELECT 'stored column named length(name)', count(), min(`length(name)`), max(`le
     (SELECT count() FROM t_stored_name WHERE v % 7 = 1 SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0)
 FROM t_stored_name;
 
+-- The same with both expressions in one index.
+CREATE TABLE t_stored_name_composite (id UInt64, name String, `length(name)` UInt64, v Int64,
+    INDEX ic (length(name), v % 7) TYPE minmax GRANULARITY 1)
+ENGINE = SummingMergeTree ORDER BY (id, `length(name)`) SETTINGS index_granularity = 100;
+INSERT INTO t_stored_name_composite SELECT number % 1000, 'abcde', 100, if(number < 2000 OR number % 2 = 0, 5, -10) FROM numbers(3000)
+SETTINGS optimize_on_insert = 1, max_insert_threads = 1, max_block_size = 65536;
+SELECT 'stored column named length(name), composite index', count(), min(`length(name)`), max(`length(name)`), sum(v),
+    (SELECT count() FROM t_stored_name_composite WHERE v % 7 = 1 SETTINGS use_skip_indexes = 1, use_query_condition_cache = 0),
+    (SELECT count() FROM t_stored_name_composite WHERE v % 7 = 1 SETTINGS use_skip_indexes = 0, use_query_condition_cache = 0)
+FROM t_stored_name_composite;
+
 DROP TABLE t_summing_length;
 DROP TABLE t_summing_modulo;
 DROP TABLE t_summing_map_keys;
 DROP TABLE t_coalescing;
+DROP TABLE t_coalescing_subcolumn;
+DROP TABLE t_physical_subcolumn_name;
 DROP TABLE t_aggregating;
 DROP TABLE t_graphite;
 DROP TABLE t_graphite_hour;
 DROP TABLE t_summing_zero;
 DROP TABLE t_replacing;
 DROP TABLE t_stored_name;
+DROP TABLE t_stored_name_composite;

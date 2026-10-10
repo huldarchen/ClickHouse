@@ -860,26 +860,20 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
         global_settings,
         *data_settings);
 
-    /// The engine merge below would aggregate skip index inputs like data columns,
-    /// so they are computed from the merged rows.
-    MergeTreeIndices indices_before_merge;
-    MergeTreeIndices indices_after_merge;
-    for (const auto & index : indices)
+    /// The engine merge below would aggregate skip index inputs like data columns, so they are computed from the merged rows.
+    /// An expression named like an inserted column stays before the merge, where its result replaces that column.
+    std::function<bool(const String &)> is_computed_before_merge;
+    ExpressionActionsPtr expr_after_merge;
+    if (optimize_on_insert)
     {
-        /// A stored column can have the name of an index result, and the post-merge evaluation would replace it.
-        const bool result_is_stored_column = std::ranges::any_of(
-            index->index.expression->getActionsDAG().getOutputs(),
-            [&](const auto * output) { return output->type != ActionsDAG::ActionType::INPUT && block.has(output->result_name); });
-        if (optimize_on_insert && !result_is_stored_column)
-            indices_after_merge.push_back(index);
-        else
-            indices_before_merge.push_back(index);
+        is_computed_before_merge = [&](const String & name) { return block.has(name); };
+        expr_after_merge = data.getSkipIndicesExpression(metadata_snapshot, indices, std::not_fn(is_computed_before_merge));
     }
 
     /// If we need to calculate some columns to sort.
     if (metadata_snapshot->hasSortingKey() || metadata_snapshot->hasSecondaryIndices())
     {
-        auto expr = data.getSortingKeyAndSkipIndicesExpression(metadata_snapshot, indices_before_merge);
+        auto expr = data.getSortingKeyAndSkipIndicesExpression(metadata_snapshot, indices, is_computed_before_merge);
         addSubcolumnsFromSortingKeyAndSkipIndicesExpression(expr, block);
         expr->execute(block);
     }
@@ -938,15 +932,20 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
         block = mergeBlock(std::move(block), metadata_snapshot, sort_description, perm_ptr, data.merging_params);
     }
 
-    if (!indices_after_merge.empty())
+    if (expr_after_merge)
     {
-        auto expr = data.getSkipIndicesExpression(metadata_snapshot, indices_after_merge);
-        /// As in a background merge, an index on a sorting key expression is also evaluated on the merged rows.
-        for (const auto * output : expr->getActionsDAG().getOutputs())
+        /// Sorting key expressions and subcolumns computed before the merge are computed again from the merged rows,
+        /// as in a background merge.
+        for (const auto * output : expr_after_merge->getActionsDAG().getOutputs())
             if (output->type != ActionsDAG::ActionType::INPUT && block.has(output->result_name))
                 block.erase(output->result_name);
-        addSubcolumnsFromSortingKeyAndSkipIndicesExpression(expr, block);
-        expr->execute(block);
+        const auto & table_columns = metadata_snapshot->getColumns();
+        for (const auto & required_column : expr_after_merge->getRequiredColumns())
+            if (block.has(required_column) && !table_columns.hasPhysical(required_column)
+                && table_columns.hasSubcolumn(GetColumnsOptions::AllPhysical, required_column))
+                block.erase(required_column);
+        addSubcolumnsFromSortingKeyAndSkipIndicesExpression(expr_after_merge, block);
+        expr_after_merge->execute(block);
     }
 
     ColumnsStatistics statistics;
