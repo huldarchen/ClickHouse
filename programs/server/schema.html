@@ -655,6 +655,7 @@
             <button type="button" class="legend-item" data-kind="dict" aria-pressed="true" title="Click to hide this category"><span class="legend-swatch" style="background:var(--header-dict)"></span>Dictionary</button>
             <button type="button" class="legend-item" data-kind="distributed" aria-pressed="true" title="Click to hide this category"><span class="legend-swatch" style="background:var(--header-distributed)"></span>Distributed</button>
             <button type="button" class="legend-item" data-kind="view" aria-pressed="true" title="Click to hide this category"><span class="legend-swatch" style="background:var(--header-view)"></span>View</button>
+            <button type="button" class="legend-item" data-kind="other" aria-pressed="true" title="Click to hide this category"><span class="legend-swatch" style="background:var(--header-other)"></span>Other table</button>
             <button type="button" id="toggle-all-categories" class="legend-item">Hide all</button>
             <span class="legend-item"><span class="legend-line" style="background:var(--link-mv)"></span>MV flow</span>
             <span class="legend-item"><span class="legend-line" style="background:var(--link-dict)"></span>Dictionary source</span>
@@ -859,9 +860,7 @@ const state = {
 };
 
 function isNodeVisible(node) {
-    /// Other table engines share the MergeTree / Table category in the legend.
-    const kind = node.kind === 'other' ? 'mt' : node.kind;
-    return (!state.dbFilter || node.database === state.dbFilter) && !state.hiddenKinds.has(kind);
+    return (!state.dbFilter || node.database === state.dbFilter) && !state.hiddenKinds.has(node.kind);
 }
 
 function setStatus(text, isError) {
