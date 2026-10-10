@@ -1,0 +1,3 @@
+auto 1000 failed 1 waited 1
+auto cancelled-in-wait 1
+cas retried_once 1
