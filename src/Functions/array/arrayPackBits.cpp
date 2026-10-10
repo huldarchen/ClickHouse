@@ -168,10 +168,14 @@ struct ArrayPackBitsImpl
             for (size_t index = begin; index < end && remaining_bits != 0; ++index)
             {
                 const UInt64 value = get_value(index);
-                for (size_t bit = bits_per_element; bit-- > 0 && remaining_bits != 0; --remaining_bits)
+                size_t bit = bits_per_element;
+                while (bit != 0 && remaining_bits != 0)
                 {
+                    --bit;
+                    --remaining_bits;
                     current_byte = static_cast<UInt8>((current_byte << 1) | ((value >> bit) & 1));
-                    if (++filled_bits == 8)
+                    ++filled_bits;
+                    if (filled_bits == 8)
                     {
                         emit_byte(current_byte);
                         current_byte = 0;
@@ -208,31 +212,41 @@ struct ArrayPackBitsImpl
 
             return column;
         }
-        else /// ColumnString or ColumnFixedString
+        else if constexpr (return_fixed_string)
         {
-            auto column = [&]
-            {
-                if constexpr (return_fixed_string)
-                    return ColumnFixedString::create(fixed_string_size);
-                else
-                    return ColumnString::create();
-            }();
-            column->reserve(num_rows);
+            auto column = ColumnFixedString::create(fixed_string_size);
+            ColumnFixedString::Chars & chars = column->getChars();
+            /// Zero-filled, so a stream shorter than `fixed_string_size` bytes is padded. The packing is cut after
+            /// `fixed_string_size` bytes, so it never writes past the row.
+            chars.resize_fill(num_rows * fixed_string_size, 0);
 
-            /// A String packs every element; a FixedString keeps the first `fixed_string_size` bytes of the stream.
-            size_t max_bits = std::numeric_limits<size_t>::max();
-            if constexpr (return_fixed_string)
-                max_bits = fixed_string_size * 8;
-
-            std::string buffer;
             size_t prev_offset = 0;
             for (size_t row = 0; row < num_rows; ++row)
             {
-                buffer.clear();
-                pack_row(prev_offset, offsets[row], max_bits, [&](UInt8 byte) { buffer.push_back(static_cast<char>(byte)); });
+                UInt8 * out = &chars[row * fixed_string_size];
+                pack_row(prev_offset, offsets[row], fixed_string_size * 8, [&](UInt8 byte)
+                {
+                    *out = byte;
+                    ++out;
+                });
+                prev_offset = offsets[row];
+            }
 
-                /// For FixedString a shorter buffer is zero-padded to the declared size by insertData.
-                column->insertData(buffer.data(), buffer.size());
+            return column;
+        }
+        else
+        {
+            auto column = ColumnString::create();
+            ColumnString::Chars & chars = column->getChars();
+            ColumnString::Offsets & res_offsets = column->getOffsets();
+            res_offsets.reserve(num_rows);
+            chars.reserve((mapped->size() * bits_per_element + 7) / 8 + num_rows);
+
+            size_t prev_offset = 0;
+            for (size_t row = 0; row < num_rows; ++row)
+            {
+                pack_row(prev_offset, offsets[row], std::numeric_limits<size_t>::max(), [&](UInt8 byte) { chars.push_back(byte); });
+                res_offsets.push_back(chars.size());
                 prev_offset = offsets[row];
             }
 
