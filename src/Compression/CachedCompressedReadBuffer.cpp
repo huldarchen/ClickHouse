@@ -38,10 +38,7 @@ void CachedCompressedReadBuffer::prefetch(Priority priority)
 
 bool CachedCompressedReadBuffer::nextImpl()
 {
-    /// Let's check for the presence of a decompressed block in the cache, grab the ownership of this block, if it exists.
-    UInt128 key = UncompressedCache::hash(path, file_pos);
-
-    owned_cell = cache->getOrSet(key, [&]()
+    auto load = [&]()
     {
         initInput();
         file_in->seek(file_pos, SEEK_SET);
@@ -63,7 +60,19 @@ bool CachedCompressedReadBuffer::nextImpl()
         }
 
         return cell;
-    });
+    };
+
+    /// At or past the read-until position the input of this reader may end before the file does; reading such a
+    /// block through the cache would make that end visible to every reader of the file.
+    if (read_until_position && file_pos >= *read_until_position)
+    {
+        owned_cell = load();
+    }
+    else
+    {
+        /// Let's check for the presence of a decompressed block in the cache, grab the ownership of this block, if it exists.
+        owned_cell = cache->getOrSet(UncompressedCache::hash(path, file_pos), load);
+    }
 
     if (owned_cell->data.size() == 0)
         return false;
