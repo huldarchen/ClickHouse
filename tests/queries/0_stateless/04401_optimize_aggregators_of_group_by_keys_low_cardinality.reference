@@ -120,7 +120,7 @@ x	1
 -- UNION subquery argument of a parent function must not be dereferenced by the pass
 1
 2
-2
+1
 2
 -- type-sensitive QUALIFY toTypeName(min(key)) must observe the analyzed type across the LC matrix
 1
@@ -142,3 +142,30 @@ x
 0
 -- correlated subquery is the whole HAVING, later ORDER BY min(s) still eliminated (observable type String)
 String
+-- IN with a constant set in a filter keeps its set argument (it is resolved as Set, not retyped by the pass)
+30
+30
+0
+1
+0
+1
+2
+0
+1
+2
+-- IN over an eliminated LowCardinality key in HAVING
+1
+2
+0
+2
+1
+2
+-- the aggregate under IN is eliminated (0 = no min left in the query tree)
+0
+-- an alias shared by an output position and a filter keeps its analyzed type in both
+1	UInt8
+x
+xz	String
+x
+x	UInt8
+x	String

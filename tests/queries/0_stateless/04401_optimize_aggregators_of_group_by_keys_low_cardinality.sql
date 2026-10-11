@@ -212,15 +212,13 @@ DROP TABLE t_lc_having_type;
 
 SELECT '-- UNION subquery argument of a parent function must not be dereferenced by the pass';
 -- A UNION subquery has no getResultType() (unlike a correlated QueryNode) and throws
--- UNSUPPORTED_METHOD if dereferenced. reresolveIfArgumentTypesChanged must never call it on a UNION
--- argument. Regression for https://github.com/ClickHouse/ClickHouse/pull/110059: these queries have
--- a UNION as a function/IN argument and must run (no UNSUPPORTED_METHOD), with results identical to
--- the optimization off.
+-- UNSUPPORTED_METHOD if dereferenced. These queries have a UNION as a function/IN argument and must
+-- run, with results identical to the optimization off.
 DROP TABLE IF EXISTS t_lc_union;
 CREATE TABLE t_lc_union (id UInt32, s LowCardinality(String)) ENGINE = Memory;
 INSERT INTO t_lc_union VALUES (1, 'x'), (2, 'y');
 SELECT id FROM t_lc_union WHERE s IN (SELECT min(s) FROM t_lc_union GROUP BY s UNION ALL SELECT 'z') ORDER BY id;
-SELECT id FROM t_lc_union WHERE s = (SELECT min(s) FROM t_lc_union GROUP BY s LIMIT 1) ORDER BY id;
+SELECT id FROM t_lc_union WHERE s = (SELECT min(s) FROM t_lc_union GROUP BY s ORDER BY s LIMIT 1) ORDER BY id;
 SELECT count() FROM t_lc_union WHERE s IN (SELECT max(s) FROM t_lc_union GROUP BY s UNION ALL SELECT anyLast(s) FROM t_lc_union GROUP BY s);
 DROP TABLE t_lc_union;
 
@@ -242,13 +240,9 @@ SELECT s, count() FROM t_lc_qualify_type GROUP BY s QUALIFY min(s) = 'x' AND toT
 DROP TABLE t_lc_qualify_type;
 
 SELECT '-- correlated scalar subquery as the whole filter root must not underflow the filter depth';
--- enterImpl increments filter_depth only for non-QUERY, non-LAMBDA nodes; a correlated scalar
--- subquery that is itself the whole HAVING/QUALIFY root saves and resets the filter context instead.
--- leaveImpl must therefore not decrement filter_depth for such a node, or it underflows to size_t(-1)
--- and the next filter root wraps back to 0 and loses the bare-key rewrite (and its pushdown) for a
--- later LC aggregate elimination. Regression for
--- https://github.com/ClickHouse/ClickHouse/pull/110059: the later QUALIFY min(s) must still be a
--- type-insensitive predicate on the bare key (result and pushdown-eligibility identical on and off).
+-- A correlated scalar subquery that is itself the whole HAVING root must not disturb the filter
+-- context of a later QUALIFY: its min(s) must still be a predicate on the bare key (result and
+-- pushdown-eligibility identical on and off).
 DROP TABLE IF EXISTS t_lc_filter_root;
 DROP TABLE IF EXISTS u_lc_filter_root;
 CREATE TABLE t_lc_filter_root
@@ -277,3 +271,35 @@ SELECT DISTINCT toTypeName(min(o.s)) FROM t_lc_filter_root AS o GROUP BY s, o.id
     HAVING (SELECT any(u_lc_filter_root.id = o.id) FROM u_lc_filter_root) ORDER BY min(o.s);
 DROP TABLE t_lc_filter_root;
 DROP TABLE u_lc_filter_root;
+
+SELECT '-- IN with a constant set in a filter keeps its set argument (it is resolved as Set, not retyped by the pass)';
+-- The Variant argument makes `in` non-transparent to LowCardinality; the pass must not cast its set.
+DROP TABLE IF EXISTS t_lc_variant_in;
+CREATE TABLE t_lc_variant_in (id UInt64, s LowCardinality(String), b String) ENGINE = MergeTree ORDER BY id;
+INSERT INTO t_lc_variant_in SELECT number, toString(number % 3), toString(number % 5) FROM numbers(30);
+SELECT count() FROM t_lc_variant_in WHERE b::Variant(String, UInt64) NOT IN ('_');
+SELECT count() FROM t_lc_variant_in PREWHERE b::Variant(String, UInt64) NOT IN ('_');
+SELECT count() FROM t_lc_variant_in WHERE b::Variant(String, UInt64) GLOBAL IN ('_');
+SELECT s FROM t_lc_variant_in GROUP BY s HAVING min(s) = '1' AND s::Variant(String, UInt64) NOT IN ('_') ORDER BY s;
+SELECT s FROM t_lc_variant_in GROUP BY s HAVING min(s)::Variant(String, UInt64) NOT IN ('_') ORDER BY s;
+SELECT s FROM t_lc_variant_in GROUP BY s QUALIFY s::Variant(String, UInt64) NOT IN ('_') ORDER BY s;
+SELECT '-- IN over an eliminated LowCardinality key in HAVING';
+SELECT s FROM t_lc_variant_in GROUP BY s HAVING min(s) IN ('1', '2') ORDER BY s;
+SELECT s FROM t_lc_variant_in GROUP BY s HAVING max(s) NOT IN ('1') ORDER BY s;
+SELECT s FROM t_lc_variant_in GROUP BY s HAVING (any(s), 1) IN (('1', 1), ('2', 1)) ORDER BY s;
+SELECT '-- the aggregate under IN is eliminated (0 = no min left in the query tree)';
+SELECT countIf(explain ILIKE '%function_name: min%') FROM (
+    EXPLAIN QUERY TREE SELECT s FROM t_lc_variant_in GROUP BY s HAVING min(s) IN ('1', '2'));
+DROP TABLE t_lc_variant_in;
+
+SELECT '-- an alias shared by an output position and a filter keeps its analyzed type in both';
+DROP TABLE IF EXISTS t_lc_shared_alias;
+CREATE TABLE t_lc_shared_alias (s LowCardinality(String)) ENGINE = Memory;
+INSERT INTO t_lc_shared_alias VALUES ('x'), ('y');
+WITH min(s) = 'x' AS cond SELECT cond, toTypeName(cond) FROM t_lc_shared_alias GROUP BY s HAVING cond;
+WITH min(s) = 'x' AS cond SELECT s FROM t_lc_shared_alias GROUP BY s HAVING cond ORDER BY toTypeName(cond), s;
+WITH concat(min(s), 'z') AS c SELECT c, toTypeName(c) FROM t_lc_shared_alias GROUP BY s HAVING c = 'xz';
+WITH min(s) = 'x' AS cond SELECT s FROM t_lc_shared_alias GROUP BY s HAVING cond AND arrayExists(x -> cond, [1]);
+WITH min(s) = 'x' AS cond SELECT s, toTypeName(cond) FROM t_lc_shared_alias GROUP BY s QUALIFY cond;
+SELECT min(s) AS m, toTypeName(m) FROM t_lc_shared_alias GROUP BY s HAVING m = 'x';
+DROP TABLE t_lc_shared_alias;
