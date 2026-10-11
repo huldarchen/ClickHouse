@@ -215,8 +215,7 @@ ColumnPtr executeDecimal(const ColumnWithTypeAndName & col_left, const ColumnWit
 
 
 #if USE_MULTITARGET_CODE
-/// `c[i] = Op::apply(compare(a[i], b[i]), 0)` over `size` 16-byte values ordered by their bytes (`IPv6`, `FixedString(16)`),
-/// `Op` over `int`; with `b_is_constant` every value is compared with the single value `b`.
+/// Compares `size` 16-byte values ordered by their bytes (`IPv6`, `FixedString(16)`); `Op` is over `int`.
 template <typename Op, bool b_is_constant>
 X86_64_V4_FUNCTION_SPECIFIC_ATTRIBUTE void compareBigEndian16_x86_64_v4(
     const UInt8 * __restrict a, const UInt8 * __restrict b, UInt8 * __restrict c, size_t size)
@@ -230,7 +229,6 @@ X86_64_V4_FUNCTION_SPECIFIC_ATTRIBUTE void compareBigEndian16_x86_64_v4(
     }
 }
 
-/// `Op<int, int>` for `<`, `>`, `<=`, `>=`, `void` for the other comparisons.
 template <typename Op> struct OrderedComparisonOverInt { using Type = void; };
 template <typename A, typename B> struct OrderedComparisonOverInt<LessOp<A, B>> { using Type = LessOp<int, int>; };
 template <typename A, typename B> struct OrderedComparisonOverInt<GreaterOp<A, B>> { using Type = GreaterOp<int, int>; };
