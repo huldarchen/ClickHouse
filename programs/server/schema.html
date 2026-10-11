@@ -2182,12 +2182,13 @@ for (const id of ['url', 'user', 'password']) {
     });
 }
 $('relayout').onclick = render;
-/// Redraw after a change of `isNodeVisible`: drop a selection that became hidden, and refresh the
-/// highlight and the sidebar of a still-visible selected node, because the redraw recomputes the
-/// links of the filtered graph and they must not refer to just-hidden neighbours.
+/// Redraw after a change of `isNodeVisible`: drop a selection that became hidden or no longer exists
+/// (a reload may have replaced the graph), and refresh the highlight and the sidebar of a still-visible
+/// selected node, because the redraw recomputes the links of the filtered graph and they must not
+/// refer to just-hidden neighbours.
 function renderWithVisibleSelection() {
     const selected = state.nodes.get(state.selectedKey);
-    if (selected && !isNodeVisible(selected)) clearHighlight();
+    if (!selected || !isNodeVisible(selected)) clearHighlight();
     render();
     if (state.selectedKey) selectNode(state.selectedKey);
 }
