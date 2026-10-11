@@ -6,8 +6,9 @@
 
 # A reduced check of the lightweight update lock: `lock_acquire_timeout` and cancellation bound the
 # wait in both Keeper modes and in both modes of a plain `MergeTree`, a wait spanning several chunks
-# registers its watch once, and losing the compare-and-swap on the `in_progress` directory retries
-# once instead of spinning on Keeper. Only one cheap arm is kept per wait path.
+# registers its watch once and is interrupted between chunks, and losing the compare-and-swap on the
+# `in_progress` directory retries once instead of spinning on Keeper. Only one cheap arm is kept per
+# wait path.
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -307,6 +308,25 @@ function run_watch()
     "
 
     start_parked_holder "$table_name" "auto"
+
+    # Cancellation between wait chunks: max_execution_time expires inside the first chunk, so only
+    # the check at the top of the next iteration interrupts the wait. The lock timeout is finite and
+    # far longer than a chunk, so without that check the wait would run until the timeout, and the
+    # check after the last chunk would still report the query's own limit. Hence the duration bound.
+    tag="$run_id-cancel"
+    error=$($CLICKHOUSE_CLIENT --query "
+        SET enable_lightweight_update = 1;
+        UPDATE $table_name SET v = 99 WHERE s LIKE 'xx%'
+        SETTINGS update_parallel_mode = 'auto', lock_acquire_timeout = 20,
+                 max_execution_time = 2, timeout_overflow_mode = 'throw', log_comment = '$tag';
+    " 2>&1 >/dev/null) && error=""
+
+    read -r duration_ms _ <<< "$(query_stats "$tag")"
+
+    cancelled=0
+    if [[ "$error" == *"Timeout exceeded:"*"maximum:"* ]]; then cancelled=1; fi
+    # Interrupted within about one chunk rather than waiting out the lock timeout.
+    echo "cancel between-chunks $cancelled promptly $(( duration_ms < 10000 ))"
 
     # A waiter with no max_execution_time parks across several chunks. Chunking the wait must not
     # re-register the watch per chunk: a timed out tryWait deregisters nothing, so that would leave a
