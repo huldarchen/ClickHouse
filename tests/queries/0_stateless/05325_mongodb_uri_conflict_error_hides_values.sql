@@ -18,7 +18,7 @@ SELECT dictGet('d_conflict', 'v', tuple('k')); -- { serverError DICTIONARIES_WAS
 
 SYSTEM FLUSH LOGS query_log;
 -- Only the two failed statements of this session: a database can be shared by several runs of the test.
--- GLOBAL: with parallel replicas a plain IN subquery runs on every replica, in a session with no history.
+-- GLOBAL: with parallel replicas a plain IN subquery also runs on the follower replicas, which have no session history.
 SELECT
     countIf(exception LIKE '%Deprecated option ''sslclientcertificatekeypassword'' conflicts with canonical name ''tlscertificatekeyfilepassword''%'),
     countIf(exception LIKE '%' || 'ERR' || 'SECRET' || '%')
