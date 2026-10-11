@@ -344,8 +344,13 @@ private:
         /// the aggregate can be dropped. Aliases (any_value / first_value -> any, last_value ->
         /// anyLast, *RespectNulls -> *_respect_nulls) are normalized to these canonical names by name
         /// resolution before this pass runs, so matching the canonical names covers them too.
+        /// The same holds for the non-interpolating exact quantiles (quantileExact, its alias
+        /// medianExact, quantileExactLow, quantileExactHigh), which return an element of the input
+        /// at some position, and for the idempotent groupBitAnd / groupBitOr (x & x = x | x = x).
+        /// The result type check below rejects any variant whose result type differs from the key.
         /// singleValueOrNull is excluded: it returns NULL unless the group has exactly one distinct
-        /// value, so it is not value-preserving; argMin/argMax are two-argument and handled elsewhere.
+        /// value, so it is not value-preserving; groupBitXor is not idempotent; interpolating
+        /// quantiles may return a value that is not an element; argMin/argMax are two-argument.
         const auto & function_name = function->getFunctionName();
         if (!(function_name == "min"
                 || function_name == "max"
@@ -353,7 +358,12 @@ private:
                 || function_name == "anyLast"
                 || function_name == "anyHeavy"
                 || function_name == "any_respect_nulls"
-                || function_name == "anyLast_respect_nulls"))
+                || function_name == "anyLast_respect_nulls"
+                || function_name == "quantileExact"
+                || function_name == "quantileExactLow"
+                || function_name == "quantileExactHigh"
+                || function_name == "groupBitAnd"
+                || function_name == "groupBitOr"))
             return false;
 
         std::vector<NodeWithInfo> candidates;
