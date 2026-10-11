@@ -2195,6 +2195,9 @@ function updateCategoryVisibility() {
     const selected = state.nodes.get(state.selectedKey);
     if (selected && !isNodeVisible(selected)) clearHighlight();
     render();
+    /// The redraw recomputes the links of the filtered graph; refresh the highlight and the
+    /// sidebar of a still-visible selected node so they do not refer to just-hidden neighbours.
+    if (state.selectedKey) selectNode(state.selectedKey);
 }
 for (const button of categoryButtons) {
     button.addEventListener('click', () => {
