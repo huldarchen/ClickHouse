@@ -163,7 +163,8 @@ public:
                 }
                 else
                 {
-                    node = createCastFunction(key_node, std::move(original_type), getContext());
+                    /// Fold a constant key the way a remote shard re-analyzing the AST does, see `foldConstantCast`.
+                    node = foldConstantCast(createCastFunction(key_node, std::move(original_type), getContext()));
                 }
             }
             else if (filter_root && function_node->isOrdinaryFunction())
@@ -221,7 +222,7 @@ private:
         if (!functionIsTransparentToLowCardinality(function_node))
         {
             for (size_t i : retyped_arguments)
-                argument_nodes[i] = createCastFunction(argument_nodes[i], resolved_argument_types[i], getContext());
+                argument_nodes[i] = foldConstantCast(createCastFunction(argument_nodes[i], resolved_argument_types[i], getContext()));
             return;
         }
 
