@@ -42,6 +42,10 @@ TableFunctionPtr TableFunctionFactory::get(
     ContextPtr context) const
 {
     const auto * table_function = ast_function->as<ASTFunction>();
+    if (!table_function)
+        throw Exception(ErrorCodes::LOGICAL_ERROR,
+            "Expected a table function (ASTFunction) but got '{}'", ast_function->formatForErrorMessage());
+
     auto res = tryGet(table_function->name, context);
     if (!res)
     {
@@ -93,6 +97,16 @@ bool TableFunctionFactory::isTableFunctionName(const std::string & name) const
     if (table_functions.contains(canonical_name))
         return true;
     return case_insensitive_table_functions.contains(Poco::toLower(canonical_name));
+}
+
+const SecretArgumentsSpec * TableFunctionFactory::tryGetSecretArgumentsSpec(const String & name_param) const
+{
+    String name = getAliasToOrName(name_param);
+    if (auto it = table_functions.find(name); it != table_functions.end())
+        return &it->second.secret_arguments;
+    if (auto it = case_insensitive_table_functions.find(Poco::toLower(name)); it != case_insensitive_table_functions.end())
+        return &it->second.secret_arguments;
+    return nullptr;
 }
 
 std::optional<FunctionDocumentation> TableFunctionFactory::tryGetDocumentation(const String & name) const
