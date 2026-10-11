@@ -2182,7 +2182,16 @@ for (const id of ['url', 'user', 'password']) {
     });
 }
 $('relayout').onclick = render;
-$('db-filter').onchange = (e) => { state.dbFilter = e.target.value; render(); };
+/// Redraw after a change of `isNodeVisible`: drop a selection that became hidden, and refresh the
+/// highlight and the sidebar of a still-visible selected node, because the redraw recomputes the
+/// links of the filtered graph and they must not refer to just-hidden neighbours.
+function renderWithVisibleSelection() {
+    const selected = state.nodes.get(state.selectedKey);
+    if (selected && !isNodeVisible(selected)) clearHighlight();
+    render();
+    if (state.selectedKey) selectNode(state.selectedKey);
+}
+$('db-filter').onchange = (e) => { state.dbFilter = e.target.value; renderWithVisibleSelection(); };
 const categoryButtons = Array.from(document.querySelectorAll('.legend-item[data-kind]'));
 function updateCategoryVisibility() {
     for (const button of categoryButtons) {
@@ -2192,12 +2201,7 @@ function updateCategoryVisibility() {
     }
     const allHidden = categoryButtons.every(button => state.hiddenKinds.has(button.dataset.kind));
     $('toggle-all-categories').textContent = allHidden ? 'Show all' : 'Hide all';
-    const selected = state.nodes.get(state.selectedKey);
-    if (selected && !isNodeVisible(selected)) clearHighlight();
-    render();
-    /// The redraw recomputes the links of the filtered graph; refresh the highlight and the
-    /// sidebar of a still-visible selected node so they do not refer to just-hidden neighbours.
-    if (state.selectedKey) selectNode(state.selectedKey);
+    renderWithVisibleSelection();
 }
 for (const button of categoryButtons) {
     button.addEventListener('click', () => {
